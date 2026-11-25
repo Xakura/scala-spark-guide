@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从关系代数与 Polars 视角重构 Scala 2.11 与 Spark 2.x 认知体系</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+/* Tier 3 Utilitarian · Technical Tutorial | Compact answer-first hero | Mental Model -> Scala 2.11 Core -> Spark 2.x Architecture -> Shuffle & Tuning -> 2.x vs 3.x & Checklist -> Sources | Plus Jakarta Sans + Noto Sans SC + JetBrains Mono | Crisp White #FFFFFF + Cobalt #1D4ED8 + Teal #0F766E | 0px image radius | Hero emphasis metric | Open 3-table + 2 SVG + 1 conceptual diagram */
+
+:root {
+  --paper: #FFFFFF;
+  --ink: #111827;
+  --ink2: #374151;
+  --mute: #4B5563;
+  --hair: #E5E7EB;
+  --accent: #1D4ED8;
+  --accent-text: #1E3A8A;
+  --accent-2: #0F766E;
+  --accent-2-text: #115E59;
+  --font-sans: 'Plus Jakarta Sans', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.72;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 68px clamp(24px, 10.4vw, 112px) 92px;
+  background: var(--paper);
+}
+
+.page {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0 24px;
+}
+
+.col-full { grid-column: 1 / -1; }
+.col-main { grid-column: 1 / 10; }
+.col-wide { grid-column: 1 / 12; }
+.col-left { grid-column: 1 / 5; }
+.col-right { grid-column: 5 / 13; }
+
+@media (max-width: 900px) {
+  .col-main, .col-wide, .col-left, .col-right {
+    grid-column: 1 / -1;
+  }
+}
+
+.measure {
+  max-width: 68ch;
+}
+
+/* Typography */
+h1 {
+  font-size: clamp(36px, 4.2vw, 52px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  margin: 0 0 20px;
+  text-wrap: balance;
+}
+
+.deck {
+  font-size: 19px;
+  line-height: 1.6;
+  color: var(--ink2);
+  margin: 0 0 32px;
+  max-width: 64ch;
+}
+
+h2 {
+  font-size: clamp(24px, 2.4vw, 32px);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 18px;
+  text-wrap: balance;
+}
+
+h3 {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ink);
+  margin: 32px 0 10px;
+}
+
+p {
+  margin: 0 0 18px;
+  color: var(--ink2);
+}
+
+strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+/* Sections */
+.sec {
+  margin-top: 68px;
+  padding-top: 40px;
+  border-top: 1px solid var(--hair);
+}
+
+/* Hero Split & Answer-First Strip */
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 24px;
+  align-items: end;
+  padding-bottom: 36px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.hero-lead {
+  grid-column: 1 / 9;
+}
+
+.hero-stat {
+  grid-column: 9 / 13;
+  border-left: 2px solid var(--accent);
+  padding-left: 20px;
+}
+
+.hero-stat-num {
+  font-family: var(--font-sans);
+  font-size: clamp(42px, 4.5vw, 64px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.hero-stat-desc {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--mute);
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .hero-lead, .hero-stat {
+    grid-column: 1 / -1;
+  }
+  .hero-stat {
+    margin-top: 8px;
+  }
+}
+
+/* Inline Navigation (no boxes) */
+.toc-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 14px;
+}
+
+.toc-strip a {
+  text-decoration: none;
+  color: var(--ink2);
+  font-weight: 500;
+}
+
+.toc-strip a:hover {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+
+/* Code & Monospace (Open canvas, left accent rule only, 0 boxes) */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--accent-text);
+}
+
+pre {
+  margin: 22px 0 26px;
+  padding: 4px 0 4px 20px;
+  border-left: 2px solid var(--accent);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink);
+  background: transparent;
+}
+
+pre code {
+  color: inherit;
+  font-size: inherit;
+}
+
+.code-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  margin: 20px 0 -16px 22px;
+}
+
+/* Open Multi-Column Strips (0 boxes) */
+.split-row {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 28px;
+}
+
+.cols-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+  margin: 28px 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--hair);
+}
+
+@media (max-width: 820px) {
+  .cols-3 {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+
+.col-item h4 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+
+.col-item p {
+  font-size: 15px;
+  margin: 0;
+}
+
+/* Pull Quote / Thesis Callout */
+blockquote {
+  margin: 32px 0;
+  padding: 20px 0;
+  border-top: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.48;
+  color: var(--ink);
+  max-width: 48ch;
+}
+
+/* Open Tables (max 3, no zebra stripes) */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 28px 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+th {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mute);
+  padding: 10px 14px 10px 0;
+  border-bottom: 2px solid var(--ink);
+  white-space: nowrap;
+}
+
+td {
+  padding: 13px 14px 13px 0;
+  border-bottom: 1px solid var(--hair);
+  color: var(--ink2);
+  vertical-align: top;
+}
+
+td:first-child {
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.num-col {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* Lists */
+ul, ol {
+  margin: 0 0 20px;
+  padding-left: 22px;
+  color: var(--ink2);
+}
+
+li {
+  margin-bottom: 10px;
+}
+
+/* Figures, Images & SVGs */
+figure {
+  margin: 36px 0;
+  padding: 0;
+}
+
+.fig-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+
+figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0;
+}
+
+figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+figcaption {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mute);
+  margin-top: 10px;
+}
+
+/* Sources list */
+.sources-list {
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+.sources-list li {
+  margin-bottom: 8px;
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+  <!-- HERO -->
+  <header class="col-full hero-grid">
+    <div class="hero-lead">
+      <h1>从关系代数与 Polars 视角，重构你的 Scala 2.11 与 Spark 2.x 认知体系</h1>
+      <p class="deck">如果你已经熟悉 Nushell 的管道流、Polars 的惰性表达式（LazyFrame）以及关系代数算子，你其实已经掌握了 Spark 80% 的核心设计哲学。本指南专为 <strong>Spark 2.x（Scala 2.11）</strong> 环境编写，打通语言机制、Catalyst 优化器与分布式物理执行。</p>
+    </div>
+    <div class="hero-stat">
+      <div class="hero-stat-num">2.11 → 2.4</div>
+      <div class="hero-stat-desc">版本澄清：<strong>2.11</strong> 是 Scala 语言版本（通常对应 <strong>Spark 2.0–2.4</strong> 系列，如 Spark 2.4.x）。Spark 3.x 起默认切换至 Scala 2.12 / 2.13。</div>
+    </div>
+  </header>
+
+  <!-- NAVIGATION STRIP -->
+  <nav class="col-full toc-strip" aria-label="章节导航">
+    <a href="#mental-model">心智模型映射</a>
+    <a href="#scala-core">Scala 2.11 语言本质</a>
+    <a href="#spark-engine">Spark 2.x 引擎与 Catalyst</a>
+    <a href="#shuffle-tuning">Shuffle 边界与调优实战</a>
+    <a href="#spark-evolution">2.x 与 3.x 差异及排障清单</a>
+    <a href="#sources">参考资料</a>
+  </nav>
+
+  <!-- SECTION 1: MENTAL MODEL -->
+  <section id="mental-model" class="col-full sec">
+    <div class="split-row">
+      <div class="col-left">
+        <h2>先把旧直觉对齐：Spark 本质上是分布式的关系代数引擎</h2>
+      </div>
+      <div class="col-right measure">
+        <p>初级使用 Spark 时最容易陷入“背 API”的误区：把 <code>DataFrame</code> 当作单机集合，把 Scala 当作带分号的 Python。事实上，你用过的 <strong>Nushell</strong>、<strong>Polars</strong> 和 <strong>关系代数</strong> 已经为你铺好了通往 Spark 内核的桥梁。</p>
+        <p>在 <a href="https://www.nushell.sh/book/dataframes.html" target="_blank" rel="noopener noreferrer">Nushell</a> 中，数据以结构化表格流经管道（<code>| where | select | group-by</code>）；在 <a href="https://docs.pola.rs/user-guide/concepts/lazy-api/" target="_blank" rel="noopener noreferrer">Polars Lazy API</a> 中，<code>pl.col("a") + 1</code> 并不是立刻计算，而是构造一棵表达式 AST，直到 <code>.collect()</code> 时才由查询优化器统一执行谓词下推与列裁剪。</p>
+        <p>Spark SQL 与 DataFrame 的设计逻辑与 Polars 几乎如出一辙，唯一的根本差异在于：<strong>Polars 在单机多核与 Arrow 列式内存中调度线程，而 Spark 必须跨越网络与 JVM 边界，在多台机器的 Executor 上调度分区（Partition）</strong>。</p>
+      </div>
+    </div>
+
+    <figure class="col-wide">
+      <p class="fig-title">Spark 将分散的分布式分区通过逻辑优化棱镜转换为紧凑的列式执行流</p>
+      <img src="data:image/jpeg;base64,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CIiAIiIAihEBKIiAhSiIAiIgCIiAIoUoAiIgCIiAIihASihSgCIiAIiIAiKEBKIiAIiIAiIgCIoQEooUoAiIgCIiAIiIAoUqEBKIiAIiIAihEBKKEQEoiIAiIgCKEQEoiIAiIgCIiAIiIAiIgCIiAKFKhAEREBKIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAIiIAiIgCIiAKFKIAiIgCIiAIiIAiIgCIiAIiIAiIgChSiAIiIAiIgCIiAIiIAiIgCIiAIiIAVClQgClQpQBERAEREAREQBERAEREAREQBFClAEREAREQBERAEUIgJREQBERAEREARQiAlERAEREARQiAlFCICUREARFCAlERAEUIgJREQBERAERQgJRFCAlERAEREARFCAlERAEREAREQBERAEUKUAREQBERAERQgJRFCAlERAEREAREQBFClAEREAREQBEUICUUIgJREQBERAERQgJRQpQBERAEREARQpQBERAEREAUKVCAlQpRAEREAREQBERAEREAREQBERAQpREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAUKUQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREBClEQBERAEREAREQBERAEREAREQBQpUICUREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREARQpQBERAEREAREQBERAEREAREQBEUICUREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREAREQBERAFClQgJRQiAlERAEREAREQBERAEREAREQBERAERQgJREQBERAEREAREQBERAEREAREQBERAEREAREQBERAEREBFClAERQgJREQBFClAEUIgJRQpQBEUICUUIgJREQBERAEUIgJRFCAlERAEUKUARFCAlERAERQgJRQpQBERAEREARQpQBERAEREAUKVCAlFClAEREAREQBEUICUUKUAREQBFCICUREAREQBEUICURQgCIiA//2Q==" alt="分布式分区数据经由查询优化器转化为结构化列式执行流的概念示意图">
+      <figcaption>概念示意：左侧代表分散在集群节点上的原始分区数据，中间的棱镜象征 Catalyst 逻辑与物理优化阶段，右侧代表经由 Tungsten 内存格式对齐后的高效批处理任务。</figcaption>
+    </figure>
+
+    <div class="col-wide table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>关系代数算子</th>
+            <th>语义本质</th>
+            <th>Nushell 管道直觉</th>
+            <th>Polars LazyFrame</th>
+            <th>Spark 2.x (Scala 2.11)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>选择 &sigma;<sub>P</sub>(R)</td>
+            <td>按布尔谓词过滤行</td>
+            <td><code>| where col &gt; 10</code></td>
+            <td><code>.filter(pl.col("col") &gt; 10)</code></td>
+            <td><code>df.filter($"col" &gt; 10)</code> 或 <code>.where(...)</code></td>
+          </tr>
+          <tr>
+            <td>投影 &pi;<sub>A</sub>(R)</td>
+            <td>列裁剪与派生列计算</td>
+            <td><code>| select a b | insert c ...</code></td>
+            <td><code>.select()</code> / <code>.with_columns()</code></td>
+            <td><code>df.select($"a")</code> / <code>.withColumn("c", ...)</code></td>
+          </tr>
+          <tr>
+            <td>分组聚合 &gamma;<sub>G, F</sub>(R)</td>
+            <td>按 Key 分桶并归约</td>
+            <td><code>| group-by k | ...</code></td>
+            <td><code>.group_by("k").agg(...)</code></td>
+            <td><code>df.groupBy($"k").agg(sum($"v"))</code></td>
+          </tr>
+          <tr>
+            <td>连接 R &bowtie; S</td>
+            <td>按连接键匹配两张关系表</td>
+            <td><code>| join $right k</code></td>
+            <td><code>.join(other, on="k")</code></td>
+            <td><code>df1.join(df2, Seq("k"), "inner")</code></td>
+          </tr>
+          <tr>
+            <td>惰性求值边界</td>
+            <td>构建逻辑计划 vs 触发执行</td>
+            <td>流式消费或 <code>polars collect</code></td>
+            <td><code>scan_parquet()</code> → <code>.collect()</code></td>
+            <td>Transformation（惰性）→ Action（<code>count</code>/<code>write</code>）</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- SECTION 2: SCALA 2.11 CORE -->
+  <section id="scala-core" class="col-full sec">
+    <div class="col-main measure">
+      <h2>Scala 2.11 语言本质：Spark 为什么需要这些特性</h2>
+      <p>Spark 最初用 Scala 编写并非偶然。Scala 将面向对象（JVM 生态）与函数式编程（不可变数据、高阶函数、代数数据类型）融合在一起。理解以下四个核心机制，你就不会再被 Spark 报错和语法糖困住。</p>
+
+      <h3>1. 不可变性与 Case Class：分布式安全的数据容器</h3>
+      <p>在单机脚本里修改一个变量很自然，但在分布式计算中，同一份算子闭包会被序列化并发送到几十个节点的线程上并发执行。如果允许随意修改共享可变状态，结果将彻底不可预测。因此 Scala 默认推崇 <code>val</code>（不可变引用）与 <a href="https://docs.scala-lang.org/overviews/collections/overview.html" target="_blank" rel="noopener noreferrer">不可变集合</a>（<code>List</code>、<code>Vector</code>、<code>Map</code>）。</p>
+      <p>更重要的是 <code>case class</code>。在 Spark 2.x 中，当你写下 <code>df.as[Trade]</code> 将 DataFrame 转为强类型 <code>Dataset[Trade]</code> 时，Spark 之所以能自动推导出列名和字段类型，全靠 <code>case class</code> 自动实现了 <code>Product</code>（提供字段反射与元数）和 <code>Serializable</code>（支持网络序列化）特质，并自带值相等（<code>equals</code>/<code>hashCode</code>）与模式匹配解构能力。</p>
+    </div>
+
+    <div class="col-main">
+      <div class="code-label">Scala 2.11 · Case Class 与不可变集合变换</div>
+      <pre><code>case class Order(orderId: String, userId: Long, amount: Double, status: String)
+
+val orders = List(
+  Order("O1", 101L, 120.5, "PAID"),
+  Order("O2", 102L, 45.0,  "CANCELLED"),
+  Order("O3", 101L, 80.0,  "PAID")
+)
+
+// 不可变集合的高阶组合：filter -> groupBy -> mapValues
+val paidTotalByUser: Map[Long, Double] = orders
+  .filter(_.status == "PAID")
+  .groupBy(_.userId)
+  .mapValues(_.map(_.amount).sum) // 注意：Scala 2.11 中 mapValues 返回视图，必要时 .toMap 固化</code></pre>
+    </div>
+
+    <div class="col-main measure">
+      <h3>2. 高阶函数与惰性集合：从 Scala 集合到 RDD</h3>
+      <p>Scala 集合库的高阶函数（<code>map</code>、<code>flatMap</code>、<code>filter</code>、<code>foldLeft</code>）几乎与 Spark RDD API 一一对应。区别在于求值策略：Scala 的 <code>List</code> 是及早求值（Eager）的，每一步都会分配新集合；而 Scala 2.11 的 <code>Stream</code> 或集合的 <code>.view</code> 是惰性求值（Lazy）的，只在最终消费时按需计算——这正是 Spark RDD Transformation（记录血缘，不立即计算）的语言级原型。</p>
+
+      <h3>3. 空值安全与偏函数：告别 NullPointerException</h3>
+      <p>数据处理中最怕脏数据导致的 <code>NullPointerException</code>。Scala 用类型系统显式表达“可能缺失”或“可能失败”：</p>
+      <ul>
+        <li><strong><code>Option[T]</code>（<code>Some(v)</code> / <code>None</code>）</strong>：强制调用方处理缺失值，配合 <code>getOrElse</code> 或 <code>flatMap</code> 链式安全展开，避免深层 <code>if (x != null)</code>。</li>
+        <li><strong><code>Try[T]</code>（<code>Success(v)</code> / <code>Failure(e)</code>）</strong>：将异常捕获转为值，适合在 Spark <code>map</code> 中安全解析畸形 JSON 或脏字符串而不让整个 Task 崩溃。</li>
+        <li><strong>偏函数（<code>PartialFunction</code>）与 <code>collect</code></strong>：用 <code>case</code> 模式匹配同时完成 <code>filter</code> 与 <code>map</code>。</li>
+      </ul>
+    </div>
+
+    <div class="col-main">
+      <div class="code-label">Scala 2.11 · Try、Option 与 PartialFunction 实战清洗</div>
+      <pre><code>import scala.util.{Try, Success, Failure}
+
+val rawLines = Seq("101,99.5", "bad_row", "102,42.0", "103,NaN")
+
+// 1. 使用 Try 安全解析，失败转为 None 后被 flatMap 自动剔除
+val parsed: Seq[(Long, Double)] = rawLines.flatMap { line =&gt;
+  val parts = line.split(",")
+  if (parts.length == 2) {
+    Try((parts(0).toLong, parts(1).toDouble)).toOption.filter(!_._2.isNaN)
+  } else None
+}
+
+// 2. 使用 PartialFunction (collect) 一步完成模式匹配过滤 + 转换
+val highValueUsers: Seq[Long] = parsed.collect {
+  case (uid, amt) if amt &gt; 50.0 =&gt; uid
+}</code></pre>
+    </div>
+
+    <div class="col-main measure">
+      <h3>4. Implicit（隐式机制）与类型标签：揭开 <code>spark.implicits._</code> 的黑盒</h3>
+      <p>初学者写 Spark 最困惑的一行代码往往是 <code>import spark.implicits._</code>。它背后是 Scala 2.11 的两个核心编译期机制：</p>
+      <ul>
+        <li><strong>隐式类（<a href="https://docs.scala-lang.org/overviews/core/implicit-classes.html" target="_blank" rel="noopener noreferrer">Implicit Class</a> / Pimp My Library）</strong>：编译器发现 <code>$"colName"</code> 里的 <code>$</code> 方法在原生 <code>StringContext</code> 上不存在，或 <code>rdd.toDF()</code> 在原生 <code>RDD</code> 上不存在时，会在当前作用域寻找能包裹该类型的隐式类（如 <code>StringToColumn</code>、<code>DatasetHolder</code>）并自动注入转换。</li>
+        <li><strong>隐式参数（<code>implicit Encoder[T]</code>）与 <code>TypeTag</code></strong>：JVM 在运行时会擦除泛型（Type Erasure），<code>Dataset[Order]</code> 在字节码层面并不知道 <code>T</code> 是 <code>Order</code>。Scala 编译器通过隐式注入 <code>TypeTag</code>（保留完整类型树）和 Spark 的 <code>ExpressionEncoder[Order]</code>，在编译期就把 <code>case class</code> 的序列化代码生成逻辑绑定到了方法调用上。</li>
+      </ul>
+    </div>
+
+    <div class="col-main">
+      <div class="code-label">Scala 2.11 · 手写一个极简隐式增强类理解原理</div>
+      <pre><code>// 编译器在找不到方法时，会自动搜索作用域内的 implicit class
+object StringOps {
+  implicit class RichString(val s: String) extends AnyVal {
+    def toSafeDouble: Option[Double] = scala.util.Try(s.toDouble).toOption
+  }
+}
+
+import StringOps._
+val price: Option[Double] = "19.99".toSafeDouble // 编译期自动转为 new RichString("19.99").toSafeDouble</code></pre>
+    </div>
+  </section>
+
+  <!-- SECTION 3: SPARK 2.x ARCHITECTURE -->
+  <section id="spark-engine" class="col-full sec">
+    <div class="col-main measure">
+      <h2>Spark 2.x 架构本质：从逻辑计划到裸机字节码</h2>
+      <p>理解 Spark 的性能密码，关键在于看清它内部的两套引擎哲学：底层的 <strong>RDD 分布式计算模型</strong>，以及上层的 <strong>Catalyst 优化器 + Tungsten 执行引擎</strong>。</p>
+    </div>
+
+    <div class="col-wide cols-3">
+      <div class="col-item">
+        <h4>RDD（弹性分布式数据集）</h4>
+        <p><a href="https://spark.apache.org/docs/latest/rdd-programming-guide.html" target="_blank" rel="noopener noreferrer">RDD</a> 是只读、分区的分布式集合。它通过血缘（Lineage）记录依赖图以实现容错重算，但对内部数据结构“一无所知”，只能依赖 Java 或 Kryo 序列化 JVM 对象。</p>
+      </div>
+      <div class="col-item">
+        <h4>DataFrame（即 Dataset[Row]）</h4>
+        <p><a href="https://spark.apache.org/docs/latest/sql-programming-guide.html" target="_blank" rel="noopener noreferrer">DataFrame</a> 附带了完整的 Schema 元数据。Spark 借此绕开缓慢的 JVM 对象创建，将数据编码为紧凑的二进制 <code>InternalRow</code>，并交由 Catalyst 做关系代数优化。</p>
+      </div>
+      <div class="col-item">
+        <h4>Dataset[T]（强类型封装）</h4>
+        <p>结合了 RDD 的编译期类型安全与 Catalyst 的存储优化。但需注意：一旦使用 Scala Lambda（如 <code>ds.filter(_.amount &gt; 10)</code>），Spark 必须将二进制反序列化回 JVM 对象，优化器也无法透视 Lambda 内部逻辑。</p>
+      </div>
+    </div>
+
+    <div class="col-main measure">
+      <h3>Catalyst 与 Tungsten：为什么 DataFrame 比 RDD 快一个数量级</h3>
+      <p>如果你用过 Polars，就会对 <a href="https://www.databricks.com/blog/2015/04/13/deep-dive-into-spark-sqls-catalyst-optimizer.html" target="_blank" rel="noopener noreferrer">Catalyst Optimizer</a> 倍感亲切。Polars 在执行 <code>.collect()</code> 前会运行谓词下推（Predicate Pushdown）、投影裁剪（Projection Pushdown）和常量折叠；Spark 的 Catalyst 在 Scala 模式匹配与树变换（Tree Transformation）的驱动下，走过完全类似的四阶段流水线：</p>
+      <ol>
+        <li><strong>Unresolved Logical Plan（未解析逻辑计划）</strong>：刚解析完 SQL 或 DataFrame API，此时只知道引用了列名和表名，尚不知其类型或是否存在。</li>
+        <li><strong>Analyzed Logical Plan（已解析逻辑计划）</strong>：结合 Catalog 元数据绑定所有列类型与表结构。</li>
+        <li><strong>Optimized Logical Plan（优化后逻辑计划）</strong>：应用基于规则的优化（RBO），包括谓词下推、列裁剪、常量折叠与表达式化简。</li>
+        <li><strong>Physical Plan &amp; Codegen（物理计划与全阶段代码生成）</strong>：生成多种物理执行策略（例如 BroadcastHashJoin 还是 SortMergeJoin），选出代价最低的方案，并由 <a href="https://www.databricks.com/blog/2015/04/28/project-tungsten-bringing-apache-spark-closer-to-bare-metal.html" target="_blank" rel="noopener noreferrer">Project Tungsten</a> 利用 <strong>Whole-Stage Code Generation</strong> 将多个算子熔合成一段紧密的 Java 字节码循环，直接在堆外二进制内存与 CPU 寄存器中运行，彻底消除虚函数调用和大量 GC 停顿。</li>
+      </ol>
+    </div>
+
+    <figure class="col-wide">
+      <p class="fig-title">Catalyst 将声明式查询经四阶段树变换编译为 Tungsten 紧凑字节码</p>
+      <svg viewBox="0 0 700 380" width="100%" role="img" aria-label="Spark Catalyst 优化器与 Tungsten 执行流水线图">
+        <!-- Background guides -->
+        <line x1="24" y1="60" x2="676" y2="60" stroke="#E5E7EB" stroke-width="1"/>
+        <line x1="24" y1="320" x2="676" y2="320" stroke="#E5E7EB" stroke-width="1"/>
+
+        <!-- Step 1: User API -->
+        <rect x="24" y="110" width="120" height="100" fill="#FFFFFF" stroke="#111827" stroke-width="1.5"/>
+        <text x="84" y="148" text-anchor="middle" font-family="Plus Jakarta Sans, Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#111827">SQL / DataFrame</text>
+        <text x="84" y="170" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#4B5563">Dataset API</text>
+        <text x="84" y="192" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#4B5563">未解析逻辑树</text>
+
+        <!-- Arrow 1 -->
+        <line x1="144" y1="160" x2="174" y2="160" stroke="#1D4ED8" stroke-width="2"/>
+        <polygon points="174,155 184,160 174,165" fill="#1D4ED8"/>
+
+        <!-- Step 2: Analysis -->
+        <rect x="184" y="110" width="120" height="100" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="244" y="148" text-anchor="middle" font-family="Plus Jakarta Sans, Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#1E3A8A">Analysis</text>
+        <text x="244" y="170" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#374151">绑定 Catalog</text>
+        <text x="244" y="192" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#4B5563">校验列与类型</text>
+
+        <!-- Arrow 2 -->
+        <line x1="304" y1="160" x2="334" y2="160" stroke="#1D4ED8" stroke-width="2"/>
+        <polygon points="334,155 344,160 334,165" fill="#1D4ED8"/>
+
+        <!-- Step 3: Logical Opt -->
+        <rect x="344" y="110" width="136" height="100" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="412" y="148" text-anchor="middle" font-family="Plus Jakarta Sans, Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#1E3A8A">Logical Opt</text>
+        <text x="412" y="170" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#374151">谓词下推 / 列裁剪</text>
+        <text x="412" y="192" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#4B5563">常量折叠化简</text>
+
+        <!-- Arrow 3 -->
+        <line x1="480" y1="160" x2="510" y2="160" stroke="#0F766E" stroke-width="2"/>
+        <polygon points="510,155 520,160 510,165" fill="#0F766E"/>
+
+        <!-- Step 4: Physical & Tungsten -->
+        <rect x="520" y="96" width="156" height="128" fill="#FFFFFF" stroke="#0F766E" stroke-width="2"/>
+        <text x="598" y="134" text-anchor="middle" font-family="Plus Jakarta Sans, Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#115E59">Physical &amp; Tungsten</text>
+        <text x="598" y="158" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#374151">代价模型选定 Join</text>
+        <text x="598" y="180" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#115E59">Whole-Stage Codegen</text>
+        <text x="598" y="204" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#4B5563">生成底层 RDD 任务</text>
+
+        <!-- Bottom annotation bar -->
+        <text x="24" y="280" font-family="JetBrains Mono, monospace" font-size="12" fill="#1E3A8A">df.explain(true)</text>
+        <text x="148" y="280" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#374151">可一次性打印上述四个阶段的完整执行计划树，是排查优化是否生效的第一工具。</text>
+      </svg>
+      <figcaption>图注：Spark SQL / DataFrame 查询在 Catalyst 与 Tungsten 引擎内部的编译流水线。数据源：Databricks Catalyst &amp; Project Tungsten 技术博客。</figcaption>
+    </figure>
+
+    <div class="col-main">
+      <div class="code-label">Spark 2.4 (Scala 2.11) · 对比强类型 Dataset 与高阶 Column 表达式</div>
+      <pre><code>import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+
+val spark = SparkSession.builder()
+  .appName("RelationalMentalModel")
+  .getOrCreate()
+
+import spark.implicits._
+
+case class Trade(symbol: String, price: Double, volume: Long)
+val ds = Seq(Trade("AAPL", 180.5, 100L), Trade("MSFT", 410.0, 50L)).toDS()
+
+// 推荐：使用 Column 表达式，Catalyst 可直接做谓词下推与 Tungsten 代码生成
+val optimized = ds
+  .filter($"volume" &gt; 60L)
+  .groupBy($"symbol")
+  .agg(sum($"price" * $"volume").as("notional"))
+
+optimized.explain(true) // 查看 Parsed / Analyzed / Optimized / Physical 四层计划</code></pre>
+    </div>
+  </section>
+
+  <!-- SECTION 4: SHUFFLE & TUNING -->
+  <section id="shuffle-tuning" class="col-full sec">
+    <div class="col-main measure">
+      <h2>Shuffle 边界、数据倾斜与 Spark 2.x 实战调优</h2>
+      <p>如果说单机 Polars 的瓶颈在内存带宽，那么分布式 Spark 80% 的性能灾难都发生在 <strong>Shuffle</strong> 边界。理解窄依赖与宽依赖，是从初级迈向进阶的分水岭。</p>
+      <ul>
+        <li><strong>窄依赖（Narrow Dependency）</strong>：父 RDD 的每个分区最多被子 RDD 的一个分区使用（如 <code>map</code>、<code>filter</code>、<code>union</code>）。这些算子可以在同一个 Stage 内流水线式（Pipeline）就地完成，不需要跨节点网络传输。</li>
+        <li><strong>宽依赖（Wide Dependency）</strong>：父 RDD 的单个分区数据会被子 RDD 的多个分区依赖（如 <code>groupByKey</code>、<code>reduceByKey</code>、<code>join</code>、<code>repartition</code>）。宽依赖强制切断 Stage，触发磁盘落盘（Shuffle Write）与跨网络拉取（Shuffle Read）。</li>
+      </ul>
+    </div>
+
+    <figure class="col-wide">
+      <p class="fig-title">窄依赖算子在同一 Stage 内流水线执行，宽依赖算子强制触发 Shuffle 切分 Stage</p>
+      <svg viewBox="0 0 700 380" width="100%" role="img" aria-label="Spark 窄依赖与宽依赖及 Stage 划分示意图">
+        <!-- Stage 0 Container Label -->
+        <text x="36" y="42" font-family="Plus Jakarta Sans, Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#1E3A8A">Stage 0 · 窄依赖流水线 (map / filter)</text>
+        <text x="436" y="42" font-family="Plus Jakarta Sans, Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#115E59">Stage 1 · 宽依赖聚合 (groupBy / join)</text>
+
+        <!-- Shuffle Boundary Line -->
+        <line x1="350" y1="24" x2="350" y2="335" stroke="#111827" stroke-width="1.5" stroke-dasharray="6,6"/>
+        <text x="350" y="360" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="500" fill="#111827">Shuffle Boundary (磁盘写 + 网络拉取)</text>
+
+        <!-- Stage 0 Partitions -->
+        <rect x="40" y="80" width="90" height="44" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="85" y="107" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#111827">Part 0</text>
+
+        <rect x="40" y="160" width="90" height="44" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="85" y="187" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#111827">Part 1</text>
+
+        <rect x="40" y="240" width="90" height="44" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="85" y="267" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" fill="#111827">Part 2</text>
+
+        <!-- Narrow Arrows -->
+        <line x1="130" y1="102" x2="190" y2="102" stroke="#1D4ED8" stroke-width="1.8"/>
+        <line x1="130" y1="182" x2="190" y2="182" stroke="#1D4ED8" stroke-width="1.8"/>
+        <line x1="130" y1="262" x2="190" y2="262" stroke="#1D4ED8" stroke-width="1.8"/>
+
+        <!-- Stage 0 Transformed -->
+        <rect x="190" y="80" width="110" height="44" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="245" y="107" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#1E3A8A">Task 0 过滤</text>
+
+        <rect x="190" y="160" width="110" height="44" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="245" y="187" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#1E3A8A">Task 1 过滤</text>
+
+        <rect x="190" y="240" width="110" height="44" fill="#FFFFFF" stroke="#1D4ED8" stroke-width="1.5"/>
+        <text x="245" y="267" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#1E3A8A">Task 2 过滤</text>
+
+        <!-- Wide Shuffle Crossing Arrows -->
+        <line x1="300" y1="102" x2="460" y2="122" stroke="#4B5563" stroke-width="1.2"/>
+        <line x1="300" y1="102" x2="460" y2="242" stroke="#4B5563" stroke-width="1.2"/>
+        <line x1="300" y1="182" x2="460" y2="122" stroke="#4B5563" stroke-width="1.2"/>
+        <line x1="300" y1="182" x2="460" y2="242" stroke="#4B5563" stroke-width="1.2"/>
+        <line x1="300" y1="262" x2="460" y2="122" stroke="#4B5563" stroke-width="1.2"/>
+        <line x1="300" y1="262" x2="460" y2="242" stroke="#4B5563" stroke-width="1.2"/>
+
+        <!-- Stage 1 Partitions -->
+        <rect x="460" y="100" width="190" height="46" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.8"/>
+        <text x="555" y="128" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#115E59">Reduce Part A (按 Key 汇总)</text>
+
+        <rect x="460" y="220" width="190" height="46" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.8"/>
+        <text x="555" y="248" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#115E59">Reduce Part B (按 Key 汇总)</text>
+      </svg>
+      <figcaption>图注：Spark DAG 调度器依据算子的依赖类型划分 Stage。窄依赖在单一 Task 内部完成内存流水线计算；宽依赖必须通过 Shuffle 按 Key 重新分区。</figcaption>
+    </figure>
+
+    <div class="col-wide table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>算子 / 操作</th>
+            <th>依赖类型</th>
+            <th>触发 Shuffle</th>
+            <th>Spark 2.x (Scala 2.11) 核心注意事项</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>map</code> / <code>filter</code> / <code>select</code></td>
+            <td>窄依赖</td>
+            <td class="num-col">否</td>
+            <td>可在同一 Stage 内合并；优先用 DataFrame Column 表达式而非 RDD Lambda。</td>
+          </tr>
+          <tr>
+            <td><code>coalesce(n)</code></td>
+            <td>窄依赖（默认）</td>
+            <td class="num-col">否（缩减分区）</td>
+            <td>适合写文件前合并小文件；若需增加分区必须显式传 <code>shuffle = true</code> 或改用 <code>repartition</code>。</td>
+          </tr>
+          <tr>
+            <td><code>repartition(n)</code></td>
+            <td>宽依赖</td>
+            <td class="num-col">是</td>
+            <td>全量 Shuffle 重散列，开销大，但可用于在倾斜算子前打散数据。</td>
+          </tr>
+          <tr>
+            <td><code>reduceByKey</code> vs <code>groupByKey</code></td>
+            <td>宽依赖</td>
+            <td class="num-col">是</td>
+            <td>RDD 层永远优先用 <code>reduceByKey</code>（Map 端预聚合），避免 <code>groupByKey</code> 全量传输导致 OOM。</td>
+          </tr>
+          <tr>
+            <td><code>broadcast(smallDf)</code> Join</td>
+            <td>广播窄连接</td>
+            <td class="num-col">否（大表免 Shuffle）</td>
+            <td>大表 Join 小表（默认阈值 10MB）时彻底消除大表 Shuffle，大幅缓解 Join 倾斜。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col-main measure">
+      <h3>Spark 2.x 必知的三大实战模式</h3>
+      <p><strong>1. 避开 <code>Task not serializable</code> 闭包陷阱：</strong> 在类（<code>class</code>）内部定义的方法或字段，如果被 RDD/Dataset 的 <code>map</code> 闭包引用，Spark 会尝试序列化整个外部类实例。解法是将共享工具方法或常量放入单例 <code>object</code> 中，或在方法内部先用局部 <code>val</code> 拷贝所需字段，或者对不可序列化的连接对象（如数据库连接池）使用 <code>@transient lazy val</code> 并配合 <code>mapPartitions</code> 按分区初始化。</p>
+      <p><strong>2. 两阶段加盐聚合（Salting）解决数据倾斜：</strong> Spark 2.x 没有 3.0 的自动倾斜拆分。当某个热 Key（例如空值或头部大客户）导致 99% 的 Task 完成而最后一个 Task 卡死时，可先给 Key 拼接随机前缀（<code>0..N</code>）做第一阶段局部聚合，再去掉前缀做第二阶段全局聚合。</p>
+    </div>
+
+    <div class="col-main">
+      <div class="code-label">Spark 2.4 (Scala 2.11) · 两阶段加盐聚合消除热 Key 倾斜</div>
+      <pre><code>import org.apache.spark.sql.functions._
+
+// 假设 df 中存在大量 user_id = "UNKNOWN" 的倾斜数据
+val salted = df
+  .withColumn("salt", (rand() * 10).cast("int"))
+  .withColumn("salted_key", concat_ws("_", $"user_id", $"salt"))
+
+// 第一阶段：打散为 10 个子桶局部求和
+val stage1 = salted
+  .groupBy($"salted_key", $"user_id")
+  .agg(sum($"amount").as("partial_sum"))
+
+// 第二阶段：剥离盐值做最终汇总，Shuffle 压力均匀分散
+val stage2 = stage1
+  .groupBy($"user_id")
+  .agg(sum($"partial_sum").as("total_amount"))</code></pre>
+    </div>
+  </section>
+
+  <!-- SECTION 5: EVOLUTION & CHECKLIST -->
+  <section id="spark-evolution" class="col-full sec">
+    <div class="col-main measure">
+      <h2>Spark 2.x 与 3.x 的演进边界，以及生产排障清单</h2>
+      <p>因为你当前使用的环境基于 <strong>Scala 2.11 + Spark 2.x</strong>，阅读网上的 Spark 3.x 文章时务必留意特性边界：Spark 3.0 起放弃了 Scala 2.11 支持，并引入了 <strong>AQE（Adaptive Query Execution）</strong>，能在运行时根据真实 Shuffle 统计动态合并小分区、将 SortMergeJoin 转为 BroadcastJoin 并自动拆分倾斜分区。在 Spark 2.x 中，这些工作需要你显式通过参数与代码控制。</p>
+    </div>
+
+    <div class="col-wide table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>线上异常现象</th>
+            <th>底层根因定位</th>
+            <th>Spark 2.x (Scala 2.11) 解决动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>99% Task 完成，最后 1 个卡死</td>
+            <td>单个热 Key 聚集导致严重数据倾斜</td>
+            <td>过滤无效空 Key；小表改用 <code>broadcast(df)</code>；聚合场景实施两阶段加盐。</td>
+          </tr>
+          <tr>
+            <td><code>Task not serializable</code></td>
+            <td>算子闭包隐式捕获了不可序列化的外部 <code>class</code> 实例</td>
+            <td>将方法移至 <code>object</code>；用局部 <code>val</code> 提取字段；使用 <code>mapPartitions</code> 初始化外部资源。</td>
+          </tr>
+          <tr>
+            <td>Shuffle 默认 200 分区过慢或 OOM</td>
+            <td><code>spark.sql.shuffle.partitions</code> 默认值为 <code>200</code></td>
+            <td>小数据集调低（如 <code>32</code>），TB 级大作业按单分区 128MB–256MB 调高。</td>
+          </tr>
+          <tr>
+            <td>输出目录产生数万个 KB 级小文件</td>
+            <td>上游高并发分区未合并直接写出</td>
+            <td>写出前调用 <code>coalesce(n)</code> 缩减分区，或按目标分区键 <code>repartition($"dt")</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote>
+      把关系代数当作骨架，把 Polars 的表达式惰性思维当作直觉，再用 Scala 的不可变性与 Spark 的 Shuffle 边界校准执行路径——你就真正走出了初级 API 搬运工的阶段。
+    </blockquote>
+  </section>
+
+  <!-- SOURCES -->
+  <section id="sources" class="col-full sec">
+    <div class="col-main">
+      <h2>参考资料与官方文档</h2>
+      <ol class="sources-list">
+        <li><a href="https://www.scala-lang.org/api/2.11.12/" target="_blank" rel="noopener noreferrer">Scala 2.11.12 Standard Library API Documentation</a></li>
+        <li><a href="https://docs.scala-lang.org/overviews/collections/overview.html" target="_blank" rel="noopener noreferrer">Scala Documentation — Mutable and Immutable Collections</a></li>
+        <li><a href="https://docs.scala-lang.org/overviews/core/implicit-classes.html" target="_blank" rel="noopener noreferrer">Scala Documentation — Implicit Classes</a></li>
+        <li><a href="https://spark.apache.org/docs/latest/rdd-programming-guide.html" target="_blank" rel="noopener noreferrer">Apache Spark — RDD Programming Guide</a></li>
+        <li><a href="https://spark.apache.org/docs/latest/sql-programming-guide.html" target="_blank" rel="noopener noreferrer">Apache Spark — Spark SQL, DataFrames and Datasets Guide</a></li>
+        <li><a href="https://www.databricks.com/blog/2015/04/13/deep-dive-into-spark-sqls-catalyst-optimizer.html" target="_blank" rel="noopener noreferrer">Databricks Blog — Deep Dive into Spark SQL's Catalyst Optimizer</a></li>
+        <li><a href="https://www.databricks.com/blog/2015/04/28/project-tungsten-bringing-apache-spark-closer-to-bare-metal.html" target="_blank" rel="noopener noreferrer">Databricks Blog — Project Tungsten: Bringing Apache Spark Closer to Bare Metal</a></li>
+        <li><a href="https://docs.pola.rs/user-guide/concepts/lazy-api/" target="_blank" rel="noopener noreferrer">Polars User Guide — Lazy API &amp; Query Optimizations</a></li>
+        <li><a href="https://www.nushell.sh/book/dataframes.html" target="_blank" rel="noopener noreferrer">Nushell Book — Dataframes &amp; Polars Integration</a></li>
+      </ol>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
